@@ -1,26 +1,45 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* AD3D.LAB palette */
+  --color-navy-950: #050a18;
+  --color-navy-900: #0a1124;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scrollbar-gutter: stable;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #020617; /* slate-950 */
+  color: #e2e8f0; /* slate-200 */
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden; /* guard against transform-induced horizontal scroll */
+}
+
+/* Cinematic blend utilities */
+@utility blend-screen {
+  mix-blend-mode: screen;
+}
+
+@utility blend-overlay {
+  mix-blend-mode: overlay;
+}
+
+/* Block the native image-save affordances site-wide as a baseline deterrent.
+   (UX only — real protection lives in /api/asset.) */
+img {
+  -webkit-user-drag: none;
+  user-select: none;
 }

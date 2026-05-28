@@ -32,6 +32,14 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but keep the documented template (no real secrets in it)
+!.env.example
+
+# protected assets (real photos are IP — never commit; served via /api/asset)
+/protected
+
+# runtime content edited via /admin
+/data
 
 # vercel
 .vercel

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   motion,
   useScroll,
@@ -12,6 +12,7 @@ import {
 import SecureImage from "@/components/ui/secure-image";
 import MagneticButton from "@/components/ui/magnetic-button";
 import { EASE_EXPO_OUT, SPRING_FOLLOW } from "@/lib/motion-configs";
+import { clamp } from "@/lib/utils";
 
 interface HeroParallaxProps {
   /** Signed URL for the blurred ambient background. */
@@ -27,8 +28,9 @@ interface HeroParallaxProps {
 /**
  * 2.5D hero with depth layers:
  *   - background (z-0): slow scroll drift + subtle scale
- *   - 3D object (z-10): sits behind the text and glides after the cursor
- *   - typography (z-20): medium scroll drift, fades out
+ *   - typography (z-20): sits lower on the screen, scroll drift + fade
+ *   - 3D object (z-30): floats above the text and glides after the pointer.
+ *     On touch devices it follows the finger; shaking the phone nudges it.
  */
 export default function HeroParallax({
   backgroundSrc,
@@ -51,34 +53,93 @@ export default function HeroParallax({
   const textY = useTransform(scrollYProgress, [0, 1], ["0%", "120%"]);
   const opacityFade = useTransform(scrollYProgress, [0, 0.7], [1, 0]);
 
-  // The object follows the cursor: target = offset from center, eased by a
-  // spring so it glides after the pointer. Clamped so it stays on-screen.
+  // The object chases the pointer (mouse or finger); a loose spring makes it
+  // glide. Clamped to a fraction of the hero so it never leaves the screen.
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
   const fgX = useSpring(mx, SPRING_FOLLOW);
   const fgY = useSpring(my, SPRING_FOLLOW);
 
-  function handleMouse(e: React.MouseEvent) {
+  function moveTo(clientX: number, clientY: number) {
     if (reduced) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const dx = e.clientX - (rect.left + rect.width / 2);
-    const dy = e.clientY - (rect.top + rect.height / 2);
-    const follow = 0.6; // how closely it chases the cursor
-    const maxX = rect.width * 0.42;
-    const maxY = rect.height * 0.42;
-    mx.set(Math.max(-maxX, Math.min(maxX, dx * follow)));
-    my.set(Math.max(-maxY, Math.min(maxY, dy * follow)));
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const dx = clientX - (rect.left + rect.width / 2);
+    const dy = clientY - (rect.top + rect.height / 2);
+    const follow = 0.6;
+    mx.set(clamp(dx * follow, -rect.width * 0.42, rect.width * 0.42));
+    my.set(clamp(dy * follow, -rect.height * 0.42, rect.height * 0.42));
   }
+
+  function recenter() {
+    mx.set(0);
+    my.set(0);
+  }
+
+  // iOS requires an explicit permission (from a user gesture) before it emits
+  // devicemotion events. Request it on the first touch.
+  function enableMotion() {
+    const DM = window.DeviceMotionEvent as unknown as {
+      requestPermission?: () => Promise<string>;
+    };
+    if (DM && typeof DM.requestPermission === "function") {
+      DM.requestPermission().catch(() => {});
+    }
+  }
+
+  // Shake-to-jiggle: a sharp change in acceleration flings the object to a
+  // random spot, then it springs back.
+  useEffect(() => {
+    if (reduced || typeof window === "undefined" || !("DeviceMotionEvent" in window)) {
+      return;
+    }
+    let last: { x: number; y: number; z: number } | null = null;
+    let lastT = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const onMotion = (e: DeviceMotionEvent) => {
+      const a = e.accelerationIncludingGravity;
+      if (!a || a.x == null || a.y == null || a.z == null) return;
+      const now = Date.now();
+      if (now - lastT < 80) return;
+      lastT = now;
+      if (last) {
+        const delta =
+          Math.abs(a.x - last.x) + Math.abs(a.y - last.y) + Math.abs(a.z - last.z);
+        if (delta > 22) {
+          const el = containerRef.current;
+          const w = (el?.offsetWidth ?? window.innerWidth) * 0.32;
+          const h = (el?.offsetHeight ?? window.innerHeight) * 0.32;
+          mx.set((Math.random() * 2 - 1) * w);
+          my.set((Math.random() * 2 - 1) * h);
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(recenter, 380);
+        }
+      }
+      last = { x: a.x, y: a.y, z: a.z };
+    };
+
+    window.addEventListener("devicemotion", onMotion);
+    return () => {
+      window.removeEventListener("devicemotion", onMotion);
+      if (timer) clearTimeout(timer);
+    };
+    // mx/my are stable refs from useMotionValue.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reduced]);
 
   return (
     <section
       ref={containerRef}
-      onMouseMove={handleMouse}
-      onMouseLeave={() => {
-        mx.set(0);
-        my.set(0);
+      onMouseMove={(e) => moveTo(e.clientX, e.clientY)}
+      onMouseLeave={recenter}
+      onTouchStart={enableMotion}
+      onTouchMove={(e) => {
+        const t = e.touches[0];
+        if (t) moveTo(t.clientX, t.clientY);
       }}
-      className="relative flex h-[100svh] w-full items-center justify-center overflow-hidden bg-[var(--bg,#020617)]"
+      className="relative flex h-[100svh] w-full flex-col items-center justify-start overflow-hidden bg-[var(--bg,#020617)] pt-[36vh] sm:pt-[38vh]"
     >
       {/* Layer 1 — background ambience */}
       <motion.div
@@ -95,7 +156,7 @@ export default function HeroParallax({
         <div className="absolute inset-0 z-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-950/60 to-slate-950" />
       </motion.div>
 
-      {/* Layer 2 — typography + CTA */}
+      {/* Layer 2 — typography + CTA (lower on screen) */}
       <motion.div
         className="relative z-20 flex flex-col items-center px-4 text-center"
         style={{ y: reduced ? 0 : textY, opacity: reduced ? 1 : opacityFade }}
@@ -134,18 +195,18 @@ export default function HeroParallax({
         </motion.div>
       </motion.div>
 
-      {/* 3D object — sits BEHIND the text (z-10) and follows the cursor */}
+      {/* 3D object — floats ABOVE the text (z-30) and follows the pointer */}
       <motion.div
-        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+        className="pointer-events-none absolute inset-x-0 top-[3vh] z-30 flex justify-center"
         style={{ x: reduced ? 0 : fgX, y: reduced ? 0 : fgY }}
       >
-        <div className="relative h-[40vh] max-h-[440px] w-[40vh] max-w-[440px] opacity-90">
+        <div className="relative h-[38vh] max-h-[420px] w-[38vh] max-w-[420px]">
           <SecureImage
             src={foregroundSrc}
             alt="Peça impressa em 3D pela AD3D.LAB"
             fill
             priority
-            className="object-contain drop-shadow-[0_20px_60px_rgba(16,185,129,0.3)]"
+            className="object-contain drop-shadow-[0_20px_60px_rgba(16,185,129,0.35)]"
           />
         </div>
       </motion.div>
